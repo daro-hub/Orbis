@@ -1,6 +1,5 @@
-import json
-from pathlib import Path
 from pydantic import BaseModel
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class BinanceConfig(BaseModel):
@@ -22,15 +21,13 @@ class SymbolsConfig(BaseModel):
     gold: str = "GOLD"
 
 
-class AppConfig(BaseModel):
+class AppConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_nested_delimiter="__", env_file=".env", extra="ignore")
+
     binance: BinanceConfig
     capital: CapitalConfig
-    symbols: SymbolsConfig
+    symbols: SymbolsConfig = SymbolsConfig()
 
 
-def load_config(path: str | None = None) -> AppConfig:
-    if path is None:
-        path = str(Path(__file__).parent.parent / "config.json")
-    with open(path, "r") as f:
-        data = json.load(f)
-    return AppConfig(**data)
+def load_config() -> AppConfig:
+    return AppConfig()

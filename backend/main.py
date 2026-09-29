@@ -1,5 +1,3 @@
-import json
-import os
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -9,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from config import load_config
 from connectors.binance_connector import BinanceConnector
 from connectors.websocket_stream import BinanceWebSocket, price_cache
 from strategies.example_sma import SMAcrossoverStrategy, RSIStrategy
@@ -19,19 +18,13 @@ from backtester.engine import BacktestEngine
 # Load config
 # ---------------------------------------------------------------------------
 
-def load_config() -> dict:
-    config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
-    with open(config_path, "r") as f:
-        return json.load(f)
-
-
 cfg = load_config()
 
-binance_cfg = cfg["binance"]
+binance_cfg = cfg.binance
 connector = BinanceConnector(
-    api_key=binance_cfg["api_key"],
-    api_secret=binance_cfg["api_secret"],
-    testnet=binance_cfg.get("testnet", True),
+    api_key=binance_cfg.api_key,
+    api_secret=binance_cfg.api_secret,
+    testnet=binance_cfg.testnet,
 )
 
 ws_stream: Optional[BinanceWebSocket] = None
@@ -44,7 +37,7 @@ ws_stream: Optional[BinanceWebSocket] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global ws_stream
-    ws_stream = BinanceWebSocket(testnet=binance_cfg.get("testnet", True))
+    ws_stream = BinanceWebSocket(testnet=binance_cfg.testnet)
     try:
         await ws_stream.connect(["BTC/USDT"])
         asyncio.create_task(ws_stream.listen())

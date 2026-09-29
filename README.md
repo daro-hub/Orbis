@@ -36,28 +36,24 @@ A further idea for later: AI models answer based on probability learned from pas
 
 ### 1. API keys
 
-Edit `config.json` in the project root with your credentials:
+Copy `backend/.env.example` to `backend/.env` and fill in your credentials (never committed):
 
-```json
-{
-  "binance": {
-    "api_key": "YOUR_BINANCE_API_KEY",
-    "api_secret": "YOUR_BINANCE_SECRET",
-    "testnet": true
-  },
-  "capital": {
-    "api_key": "YOUR_CAPITAL_API_KEY",
-    "identifier": "YOUR_CAPITAL_EMAIL",
-    "password": "YOUR_CAPITAL_PASSWORD",
-    "demo": true
-  },
-  "symbols": {
-    "bitcoin": "BTC/USDT",
-    "nasdaq": "US100",
-    "gold": "GOLD"
-  }
-}
+```bash
+cp backend/.env.example backend/.env
 ```
+
+```env
+BINANCE__API_KEY=your-binance-testnet-api-key
+BINANCE__API_SECRET=your-binance-testnet-api-secret
+BINANCE__TESTNET=true
+
+CAPITAL__API_KEY=your-capital-api-key
+CAPITAL__IDENTIFIER=your-capital-email
+CAPITAL__PASSWORD=your-capital-password
+CAPITAL__DEMO=true
+```
+
+Binance testnet keys: [testnet.binance.vision](https://testnet.binance.vision/). Capital.com demo account: [capital.com](https://capital.com/).
 
 ### 2. Backend
 
@@ -108,11 +104,11 @@ orbis/
 │   ├── trading/           # Order execution and bots
 │   ├── strategies/        # Trading strategies
 │   ├── data/historical/   # Historical CSV data
-│   └── results/           # Backtest result JSONs
-├── frontend/
-│   └── src/
-│       ├── app/           # Next.js pages
-│       ├── components/    # React components
-│       └── lib/           # API client
-└── config.json            # Credentials (do NOT commit!)
+│   ├── results/           # Backtest result JSONs
+│   └── .env               # Credentials, from .env.example (do NOT commit)
+└── frontend/
+    └── src/
+        ├── app/           # Next.js pages
+        ├── components/    # React components
+        └── lib/           # API client
 ```
