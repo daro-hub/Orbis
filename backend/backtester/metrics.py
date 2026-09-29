@@ -1,9 +1,18 @@
 import numpy as np
-import pandas as pd
 
 
-def calculate_metrics(trades: list[dict], equity_curve: list[float], initial_capital: float) -> dict:
-    """Calculate performance metrics from trade history and equity curve."""
+def calculate_metrics(
+    trades: list[dict],
+    equity_curve: list[float],
+    initial_capital: float,
+    periods_per_year: float = 252.0,
+) -> dict:
+    """Calculate performance metrics from trade history and equity curve.
+
+    periods_per_year annualizes the Sharpe ratio for the bar spacing actually
+    used (e.g. ~8760 for 1h candles, ~365 for 1d) — a fixed 252 (trading days)
+    silently overstates Sharpe on any intraday timeframe.
+    """
     if not trades:
         return {
             "total_trades": 0,
@@ -26,20 +35,32 @@ def calculate_metrics(trades: list[dict], equity_curve: list[float], initial_cap
     total_pnl = sum(pnls)
     win_rate = len(wins) / len(trades) * 100 if trades else 0
 
-    gross_profit = sum(wins) if wins else 0
-    gross_loss = abs(sum(losses)) if losses else 1
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
+    gross_profit = sum(wins) if wins else 0.0
+    gross_loss = abs(sum(losses)) if losses else 0.0
+    if gross_loss == 0:
+        # No losing trades: a true ratio would be infinite, which isn't
+        # valid JSON. Cap it instead of silently returning a dollar amount
+        # (the previous bug) or `inf` (which breaks res.json() client-side).
+        profit_factor = 9999.0 if gross_profit > 0 else 0.0
+    else:
+        profit_factor = gross_profit / gross_loss
 
     equity = np.array(equity_curve)
     peak = np.maximum.accumulate(equity)
     drawdown = peak - equity
-    max_drawdown = np.max(drawdown) if len(drawdown) > 0 else 0
-    max_drawdown_pct = (max_drawdown / np.max(peak) * 100) if np.max(peak) > 0 else 0
+    max_drawdown = float(np.max(drawdown)) if len(drawdown) > 0 else 0.0
+
+    # % drawdown against the running peak at each point, not the single
+    # global peak — otherwise a big drop after an early, smaller peak gets
+    # diluted by a later, unrelated all-time high.
+    safe_peak = np.where(peak > 0, peak, 1)
+    drawdown_pct_series = drawdown / safe_peak
+    max_drawdown_pct = float(np.max(drawdown_pct_series) * 100) if len(drawdown_pct_series) > 0 else 0.0
 
     returns = np.diff(equity) / equity[:-1] if len(equity) > 1 else np.array([0])
     sharpe_ratio = 0
     if len(returns) > 1 and np.std(returns) > 0:
-        sharpe_ratio = np.mean(returns) / np.std(returns) * np.sqrt(252)
+        sharpe_ratio = np.mean(returns) / np.std(returns) * np.sqrt(periods_per_year)
 
     return {
         "total_trades": len(trades),

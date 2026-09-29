@@ -4,23 +4,25 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import Chart from "@/components/Chart";
 import TradePanel from "@/components/TradePanel";
-import { fetchHistory, subscribePrices, CandleData } from "@/lib/api";
-
-const SYMBOLS = [
-  { id: "BTC/USDT", name: "Bitcoin" },
-  { id: "US100", name: "NASDAQ 100" },
-  { id: "GOLD", name: "Gold (XAU/USD)" },
-];
+import { fetchHistory, fetchSymbols, subscribePrices, CandleData, Symbol } from "@/lib/api";
 
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"];
 
 export default function Home() {
+  const [symbols, setSymbols] = useState<Symbol[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState("BTC/USDT");
   const [timeframe, setTimeframe] = useState("1h");
   const [chartData, setChartData] = useState<CandleData[]>([]);
-  const [prices, setPrices] = useState<Record<string, { last: number; bid: number; ask: number; change_pct?: number }>>({});
+  const [prices, setPrices] = useState<Record<string, { last: number; bid: number; ask: number; change_pct?: number; stale?: boolean }>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    // The backend, not this component, decides which symbols exist and
+    // whether each broker is actually configured — hardcoding the same
+    // list here is what let NASDAQ/Gold sit in the UI permanently 502ing.
+    fetchSymbols().then(setSymbols).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const unsubscribe = subscribePrices((updated) => {
@@ -60,16 +62,19 @@ export default function Home() {
       <div className="container">
         <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center" }}>
           <div className="tab-bar">
-            {SYMBOLS.map((s) => (
+            {symbols.map((s) => (
               <button
                 key={s.id}
                 className={`tab ${selectedSymbol === s.id ? "active" : ""}`}
-                onClick={() => setSelectedSymbol(s.id)}
+                onClick={() => s.available && setSelectedSymbol(s.id)}
+                disabled={!s.available}
+                title={s.available ? undefined : `${s.broker} not configured on this server`}
               >
                 {s.name}
                 {prices[s.id] && (
                   <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text-secondary)" }}>
                     ${prices[s.id].last.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    {prices[s.id].stale ? " (stale)" : ""}
                   </span>
                 )}
               </button>

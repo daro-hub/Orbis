@@ -22,6 +22,8 @@ A further idea for later: AI models answer based on probability learned from pas
 1. **SMA Crossover** — moving average crossover (parameters: `fast_period`, `slow_period`)
 2. **RSI Strategy** — overbought/oversold (parameters: `period`, `oversold`, `overbought`)
 
+Strategies are plugged in via a small registry (`strategies/registry.py`) instead of an `if/elif` over hardcoded classes: a new strategy just implements `BaseStrategy.generate_signals` and adds one `@register_strategy("id")` decorator, and it's immediately available to the backtester, the live bot, and the `/api/backtest/strategies` listing — no other file needs to change. This is also the extension point the self-correcting agent loop (see "The idea" above) would write into.
+
 ## Stack
 
 - **Backend:** FastAPI (Python) — broker connectors, backtesting engine, strategy execution
@@ -46,24 +48,28 @@ cp backend/.env.example backend/.env
 BINANCE__API_KEY=your-binance-testnet-api-key
 BINANCE__API_SECRET=your-binance-testnet-api-secret
 BINANCE__TESTNET=true
+```
 
+Binance testnet keys: [testnet.binance.vision](https://testnet.binance.vision/). This alone is enough to run everything BTC-related (dashboard, backtest, live prices).
+
+Capital.com (NASDAQ/Gold) is optional — the backend boots fine without it and `/api/symbols` reports those two as `available: false` instead of the app crashing on missing config. To enable them, get a [Capital.com](https://capital.com/) demo account and add:
+
+```env
 CAPITAL__API_KEY=your-capital-api-key
 CAPITAL__IDENTIFIER=your-capital-email
 CAPITAL__PASSWORD=your-capital-password
 CAPITAL__DEMO=true
 ```
 
-Binance testnet keys: [testnet.binance.vision](https://testnet.binance.vision/). Capital.com demo account: [capital.com](https://capital.com/).
-
 ### 2. Backend
 
 ```bash
 cd backend
 pip install -r requirements.txt
-python main.py
+uvicorn main:app --reload --port 8000
 ```
 
-Server runs at http://localhost:8000.
+Server runs at http://localhost:8000. Interactive docs at `/docs`.
 
 ### 3. Frontend
 
@@ -74,6 +80,26 @@ npm run dev
 ```
 
 Frontend runs at http://localhost:3000.
+
+## Tests
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest
+```
+
+Covers the backtesting engine and metrics: correct PnL/commission accounting, no look-ahead bias (a signal read from bar *i* only fills at bar *i+1*'s open, never at bar *i*'s own close), Sharpe annualized for the actual bar spacing instead of a hardcoded trading-day count, and the strategy registry.
+
+## Reliability
+
+- Read-only broker calls (price, history, balance, positions) retry with exponential backoff on transient network errors; order placement never auto-retries, since retrying a write that may have already gone through risks a duplicate order.
+- The live Binance price WebSocket reconnects with backoff on any drop instead of dying silently; cached prices older than 30s are flagged `stale` so the UI can show that instead of a frozen "● LIVE".
+- `CapitalConnector` offloads its (synchronous) HTTP calls to a thread so a slow Capital.com response can't block the whole event loop, including unrelated Binance/websocket traffic.
+
+## Auth & CORS
+
+Order placement and bot start/stop are open by default for local dev. Set `API_KEY` in `.env` to require an `X-API-Key` header on those endpoints, and `ALLOWED_ORIGINS` (comma-separated) to restrict which frontend origins the API accepts requests from — see `backend/.env.example`.
 
 ## API endpoints
 
@@ -97,15 +123,29 @@ Frontend runs at http://localhost:3000.
 ```
 orbis/
 ├── backend/
-│   ├── main.py            # FastAPI server
-│   ├── config.py          # Configuration
-│   ├── connectors/        # Broker connections
-│   ├── backtester/        # Backtesting engine
-│   ├── trading/           # Order execution and bots
-│   ├── strategies/        # Trading strategies
-│   ├── data/historical/   # Historical CSV data
-│   ├── results/           # Backtest result JSONs
-│   └── .env               # Credentials, from .env.example (do NOT commit)
+│   ├── main.py                    # FastAPI server, symbol -> broker dispatch
+│   ├── config.py                  # Env-based settings (pydantic-settings)
+│   ├── connectors/
+│   │   ├── base.py                # BaseConnector interface all brokers implement
+│   │   ├── binance_connector.py   # BTC/USDT via ccxt
+│   │   ├── capital_connector.py   # NASDAQ/Gold via Capital.com (optional)
+│   │   ├── resilience.py          # Retry-with-backoff decorator for read calls
+│   │   └── websocket_stream.py    # Live price stream with auto-reconnect
+│   ├── backtester/
+│   │   ├── engine.py              # Event-driven backtest, no look-ahead
+│   │   └── metrics.py             # Sharpe/drawdown/profit factor
+│   ├── trading/
+│   │   ├── bot.py                 # Live strategy execution loop
+│   │   ├── executor.py            # Order validation/logging
+│   │   └── risk.py                # Position sizing, exposure limits
+│   ├── strategies/
+│   │   ├── base.py                # BaseStrategy interface
+│   │   ├── registry.py            # @register_strategy — pluggable, no if/elif
+│   │   └── example_sma.py         # SMA Crossover + RSI
+│   ├── tests/                     # pytest: engine, metrics, registry
+│   ├── data/historical/           # Historical CSV data (gitignored)
+│   ├── results/                   # Backtest result JSONs (gitignored)
+│   └── .env                       # Credentials, from .env.example (do NOT commit)
 └── frontend/
     └── src/
         ├── app/           # Next.js pages

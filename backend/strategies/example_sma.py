@@ -1,7 +1,9 @@
 import pandas as pd
 from .base import BaseStrategy, Signal
+from .registry import register_strategy
 
 
+@register_strategy("sma_crossover")
 class SMAcrossoverStrategy(BaseStrategy):
     """
     Simple Moving Average Crossover Strategy.
@@ -26,9 +28,12 @@ class SMAcrossoverStrategy(BaseStrategy):
 
         df["signal"] = Signal.HOLD
 
-        # Crossover detection
+        # Crossover detection. A plain shift(1) leaves NaN on the first
+        # row, which upcasts the boolean Series to object/float — `~` on
+        # that raises TypeError. fill_value=False keeps it a real bool
+        # Series (there's no "previous" state on the first row anyway).
         fast_above = df["sma_fast"] > df["sma_slow"]
-        fast_above_prev = fast_above.shift(1)
+        fast_above_prev = fast_above.shift(1, fill_value=False)
 
         # Buy: fast crosses above slow
         df.loc[fast_above & ~fast_above_prev, "signal"] = Signal.BUY
@@ -38,6 +43,7 @@ class SMAcrossoverStrategy(BaseStrategy):
         return df
 
 
+@register_strategy("rsi")
 class RSIStrategy(BaseStrategy):
     """
     RSI Overbought/Oversold Strategy.

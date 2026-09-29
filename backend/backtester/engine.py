@@ -3,16 +3,25 @@ import os
 from datetime import datetime
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 from strategies.base import BaseStrategy, Signal
 from .metrics import calculate_metrics
+
+SECONDS_PER_YEAR = 365 * 24 * 3600
 
 
 class BacktestEngine:
     """
     Event-driven backtesting engine.
     Iterates over historical candles and simulates trade execution.
+
+    A signal computed from bar i's close is only known once bar i has fully
+    formed, so it is executed at bar i+1's open — never at bar i's own close.
+    Executing on the same bar that produced the signal is look-ahead bias:
+    it assumes you could trade at a price before it's possible to know the
+    signal that price would produce.
     """
 
     def __init__(
@@ -40,38 +49,40 @@ class BacktestEngine:
         self.reset()
 
         df_with_signals = self.strategy.generate_signals(df)
+        n = len(df_with_signals)
+        timestamps = df_with_signals.index
+        opens = df_with_signals["open"].to_numpy()
+        closes = df_with_signals["close"].to_numpy()
+        signals = df_with_signals["signal"].to_numpy()
 
-        for i, (timestamp, row) in enumerate(df_with_signals.iterrows()):
-            signal = row.get("signal", Signal.HOLD)
-            price = row["close"]
+        pending_signal = None
 
-            if signal == Signal.BUY and self.position is None:
-                self._open_position("buy", price, timestamp)
-            elif signal == Signal.SELL and self.position is not None:
-                self._close_position(price, timestamp)
-            elif signal == Signal.SELL and self.position is None:
-                self._open_position("sell", price, timestamp)
-            elif signal == Signal.BUY and self.position is not None and self.position["side"] == "sell":
-                self._close_position(price, timestamp)
+        for i in range(n):
+            if pending_signal is not None:
+                self._execute_signal(pending_signal, opens[i], timestamps[i])
+                pending_signal = None
 
-            current_equity = self._calculate_equity(price)
-            self.equity_curve.append(current_equity)
+            self.equity_curve.append(self._calculate_equity(closes[i]))
 
-            if signal != Signal.HOLD:
+            if signals[i] != Signal.HOLD:
                 self.signals_log.append({
-                    "timestamp": str(timestamp),
-                    "signal": signal,
-                    "price": price,
+                    "timestamp": str(timestamps[i]),
+                    "signal": signals[i],
+                    "price": float(closes[i]),
                     "index": i,
                 })
+                # Queued for execution at the *next* bar's open, not this
+                # bar's close — see class docstring.
+                pending_signal = signals[i]
 
-        # Close any remaining position at last price
-        if self.position is not None:
-            last_price = df_with_signals.iloc[-1]["close"]
-            last_ts = df_with_signals.index[-1]
-            self._close_position(last_price, last_ts)
+        # Close any remaining position at the last available price — there
+        # is no further bar to execute a fresh signal on.
+        if self.position is not None and n > 0:
+            self._close_position(float(closes[-1]), timestamps[-1])
+            self.equity_curve[-1] = self._calculate_equity(float(closes[-1]))
 
-        metrics = calculate_metrics(self.trades, self.equity_curve, self.initial_capital)
+        periods_per_year = self._periods_per_year(timestamps)
+        metrics = calculate_metrics(self.trades, self.equity_curve, self.initial_capital, periods_per_year)
 
         return {
             "strategy": self.strategy.name,
@@ -81,6 +92,29 @@ class BacktestEngine:
             "equity_curve": self.equity_curve,
             "signals": self.signals_log,
         }
+
+    @staticmethod
+    def _periods_per_year(timestamps: pd.Index) -> float:
+        """Infer the Sharpe annualization factor from the actual bar spacing
+        instead of assuming daily bars (a fixed sqrt(252) overstates Sharpe
+        by ~5-6x on hourly data)."""
+        if len(timestamps) < 2:
+            return 252.0
+        deltas = np.diff(timestamps.values).astype("timedelta64[s]").astype(float)
+        median_seconds = float(np.median(deltas))
+        if median_seconds <= 0:
+            return 252.0
+        return SECONDS_PER_YEAR / median_seconds
+
+    def _execute_signal(self, signal: str, price: float, timestamp):
+        if signal == Signal.BUY and self.position is None:
+            self._open_position("buy", price, timestamp)
+        elif signal == Signal.SELL and self.position is not None:
+            self._close_position(price, timestamp)
+        elif signal == Signal.SELL and self.position is None:
+            self._open_position("sell", price, timestamp)
+        elif signal == Signal.BUY and self.position is not None and self.position["side"] == "sell":
+            self._close_position(price, timestamp)
 
     def _open_position(self, side: str, price: float, timestamp):
         slippage = price * self.slippage_pct
@@ -111,10 +145,18 @@ class BacktestEngine:
         else:
             pnl = (self.position["entry_price"] - exit_price) * self.position["quantity"]
 
-        commission = abs(pnl + self.capital) * self.commission_pct
-        pnl -= commission
+        # Commission on the actual notional leaving the position, not on
+        # `pnl + self.capital` (a leftover-cash figure that has nothing to
+        # do with the position's exit value and, combined with overwriting
+        # self.capital below, silently discarded the entry commission).
+        exit_notional = self.position["quantity"] * exit_price
+        commission_exit = exit_notional * self.commission_pct
+        pnl -= commission_exit
 
-        self.capital = self.position["quantity"] * self.position["entry_price"] + pnl
+        # self.capital already reflects capital-after-entry-commission and
+        # sits untouched while the position is open (see _calculate_equity);
+        # closing just realizes the net pnl into it.
+        self.capital += pnl
 
         trade = {
             "side": self.position["side"],

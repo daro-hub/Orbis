@@ -10,12 +10,9 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from config import load_config, AppConfig
-from connectors.binance_connector import BinanceConnector
-from connectors.capital_connector import CapitalConnector
 from connectors.base import BaseConnector
 from strategies.base import BaseStrategy, Signal
-from strategies.example_sma import SMAcrossoverStrategy, RSIStrategy
+from strategies.registry import create_strategy
 from trading.risk import RiskManager, RiskConfig
 
 
@@ -167,33 +164,25 @@ async def start_bot(
     symbol: str,
     strategy_id: str,
     strategy_params: dict,
-    config: AppConfig,
+    connector: BaseConnector,
     timeframe: str = "1h",
     check_interval: int = 60,
 ) -> str:
-    """Start a new bot instance."""
+    """Start a new bot instance.
+
+    `connector` is built and dispatched by the caller (main.py already
+    knows which broker serves which symbol) — the bot only orchestrates
+    strategy + risk + execution, it doesn't need to know about brokers.
+    """
     bot_id = f"{symbol}_{strategy_id}"
 
     if bot_id in active_bots:
         return f"Bot {bot_id} already running"
 
-    STRATEGIES = {"sma_crossover": SMAcrossoverStrategy, "rsi": RSIStrategy}
-    strategy_class = STRATEGIES.get(strategy_id)
-    if not strategy_class:
+    try:
+        strategy = create_strategy(strategy_id, strategy_params)
+    except KeyError:
         return f"Unknown strategy: {strategy_id}"
-
-    strategy = strategy_class(**strategy_params)
-
-    if symbol == "BTC/USDT":
-        from connectors.binance_connector import BinanceConnector
-        connector = BinanceConnector(
-            config.binance.api_key, config.binance.api_secret, config.binance.testnet
-        )
-    else:
-        connector = CapitalConnector(
-            config.capital.api_key, config.capital.identifier,
-            config.capital.password, config.capital.demo
-        )
 
     bot = TradingBot(
         connector=connector,

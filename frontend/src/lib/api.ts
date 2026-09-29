@@ -14,6 +14,7 @@ export interface Symbol {
   id: string;
   name: string;
   broker: string;
+  available: boolean;
 }
 
 export interface BacktestResult {

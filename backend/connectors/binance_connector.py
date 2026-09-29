@@ -2,6 +2,13 @@ import ccxt.async_support as ccxt
 import pandas as pd
 from typing import Optional
 from .base import BaseConnector
+from .resilience import with_retry
+
+# Transient failures worth a retry: connectivity blips, rate limiting,
+# exchange briefly unavailable. Anything else (bad symbol, insufficient
+# funds, auth) is a real error and should surface immediately.
+_TRANSIENT = (ccxt.NetworkError, ccxt.ExchangeNotAvailable, ccxt.RequestTimeout, ccxt.DDoSProtection)
+_retry = with_retry(_TRANSIENT)
 
 
 class BinanceConnector(BaseConnector):
@@ -19,6 +26,7 @@ class BinanceConnector(BaseConnector):
     async def close(self):
         await self.exchange.close()
 
+    @_retry
     async def get_historical_data(
         self,
         symbol: str,
@@ -34,6 +42,7 @@ class BinanceConnector(BaseConnector):
         df.set_index("timestamp", inplace=True)
         return df
 
+    @_retry
     async def get_current_price(self, symbol: str) -> dict:
         ticker = await self.exchange.fetch_ticker(symbol)
         return {
@@ -79,6 +88,7 @@ class BinanceConnector(BaseConnector):
             return await self.place_order(symbol, "sell", available)
         return {"status": "no_position"}
 
+    @_retry
     async def get_open_positions(self) -> list[dict]:
         balance = await self.exchange.fetch_balance()
         positions = []
@@ -103,6 +113,7 @@ class BinanceConnector(BaseConnector):
                     continue
         return positions
 
+    @_retry
     async def get_balance(self) -> dict:
         balance = await self.exchange.fetch_balance()
         return {

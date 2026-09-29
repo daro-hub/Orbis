@@ -3,25 +3,25 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import TradePanel from "@/components/TradePanel";
-import { fetchPositions, fetchBalance, fetchPrice } from "@/lib/api";
-
-const SYMBOLS = [
-  { id: "BTC/USDT", name: "Bitcoin" },
-  { id: "US100", name: "NASDAQ 100" },
-  { id: "GOLD", name: "Gold (XAU/USD)" },
-];
+import { fetchPositions, fetchBalance, fetchPrice, fetchSymbols, Symbol } from "@/lib/api";
 
 export default function TradePage() {
+  const [symbols, setSymbols] = useState<Symbol[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [balances, setBalances] = useState<any>({});
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    fetchSymbols().then(setSymbols).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (symbols.length === 0) return;
     loadData();
     const interval = setInterval(loadData, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [symbols]);
 
   const loadData = async () => {
     try {
@@ -32,7 +32,7 @@ export default function TradePage() {
       setPositions(posData.positions || []);
       setBalances(balData);
 
-      const pricePromises = SYMBOLS.map(async (s) => {
+      const pricePromises = symbols.filter((s) => s.available).map(async (s) => {
         try {
           const p = await fetchPrice(s.id);
           return { id: s.id, price: p.last };
@@ -97,11 +97,11 @@ export default function TradePage() {
         <div className="card" style={{ marginBottom: 16 }}>
           <h3 style={{ marginBottom: 12, fontSize: 14 }}>Live Prices</h3>
           <div className="grid-3">
-            {SYMBOLS.map((s) => (
-              <div key={s.id} style={{ textAlign: "center", padding: 12 }}>
+            {symbols.map((s) => (
+              <div key={s.id} style={{ textAlign: "center", padding: 12, opacity: s.available ? 1 : 0.5 }}>
                 <p style={{ fontSize: 12, color: "var(--text-secondary)" }}>{s.name}</p>
                 <p style={{ fontSize: 20, fontWeight: 700 }}>
-                  {prices[s.id] ? `$${prices[s.id].toLocaleString()}` : "---"}
+                  {!s.available ? "N/A" : prices[s.id] ? `$${prices[s.id].toLocaleString()}` : "---"}
                 </p>
               </div>
             ))}
@@ -144,7 +144,7 @@ export default function TradePage() {
 
         <h3 style={{ marginBottom: 12, fontSize: 16 }}>Place Orders</h3>
         <div className="grid-3">
-          {SYMBOLS.map((s) => (
+          {symbols.filter((s) => s.available).map((s) => (
             <TradePanel key={s.id} symbol={s.id} currentPrice={prices[s.id]} />
           ))}
         </div>

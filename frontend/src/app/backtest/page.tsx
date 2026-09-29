@@ -4,17 +4,12 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import Chart from "@/components/Chart";
 import BacktestResults from "@/components/BacktestResults";
-import { fetchHistory, fetchStrategies, runBacktest, CandleData, Strategy, BacktestResult } from "@/lib/api";
-
-const SYMBOLS = [
-  { id: "BTC/USDT", name: "Bitcoin" },
-  { id: "US100", name: "NASDAQ 100" },
-  { id: "GOLD", name: "Gold (XAU/USD)" },
-];
+import { fetchHistory, fetchStrategies, fetchSymbols, runBacktest, CandleData, Strategy, BacktestResult, Symbol } from "@/lib/api";
 
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"];
 
 export default function BacktestPage() {
+  const [symbols, setSymbols] = useState<Symbol[]>([]);
   const [symbol, setSymbol] = useState("BTC/USDT");
   const [timeframe, setTimeframe] = useState("1h");
   const [limit, setLimit] = useState(500);
@@ -29,6 +24,7 @@ export default function BacktestPage() {
 
   useEffect(() => {
     loadStrategies();
+    fetchSymbols().then(setSymbols).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -98,8 +94,10 @@ export default function BacktestPage() {
             <div>
               <label>Symbol</label>
               <select value={symbol} onChange={(e) => setSymbol(e.target.value)}>
-                {SYMBOLS.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+                {symbols.map((s) => (
+                  <option key={s.id} value={s.id} disabled={!s.available}>
+                    {s.name}{!s.available ? " (not configured)" : ""}
+                  </option>
                 ))}
               </select>
             </div>

@@ -1,12 +1,23 @@
+import asyncio
 import time
 import requests
 import pandas as pd
 from typing import Optional
 from .base import BaseConnector
+from .resilience import with_retry
+
+_TRANSIENT = (requests.exceptions.ConnectionError, requests.exceptions.Timeout)
+_retry = with_retry(_TRANSIENT)
 
 
 class CapitalConnector(BaseConnector):
-    """Connector for Capital.com API (NASDAQ and Gold CFD trading)."""
+    """Connector for Capital.com API (NASDAQ and Gold CFD trading).
+
+    `requests` is synchronous, so every call is offloaded to a thread via
+    asyncio.to_thread — otherwise a slow Capital.com response would block
+    the whole FastAPI event loop, including unrelated Binance/websocket
+    traffic being served at the same time.
+    """
 
     DEMO_URL = "https://demo-api-capital.backend-capital.com"
     LIVE_URL = "https://api-capital.backend-capital.com"
@@ -34,7 +45,7 @@ class CapitalConnector(BaseConnector):
             "password": self.password,
             "encryptedPassword": False,
         }
-        resp = requests.post(url, json=payload, headers=headers)
+        resp = requests.post(url, json=payload, headers=headers, timeout=10)
         resp.raise_for_status()
         self.cst = resp.headers.get("CST")
         self.security_token = resp.headers.get("X-SECURITY-TOKEN")
@@ -49,6 +60,7 @@ class CapitalConnector(BaseConnector):
             "Content-Type": "application/json",
         }
 
+    @_retry
     async def get_historical_data(
         self,
         symbol: str,
@@ -76,9 +88,7 @@ class CapitalConnector(BaseConnector):
                 "%Y-%m-%dT%H:%M:%S"
             )
 
-        resp = requests.get(url, headers=self._headers(), params=params)
-        resp.raise_for_status()
-        data = resp.json()
+        data = await asyncio.to_thread(self._get_json, url, params)
 
         prices = data.get("prices", [])
         if not prices:
@@ -86,7 +96,6 @@ class CapitalConnector(BaseConnector):
 
         rows = []
         for p in prices:
-            bid = p.get("closePrice", {})
             rows.append({
                 "timestamp": pd.to_datetime(p["snapshotTime"]),
                 "open": (p["openPrice"]["bid"] + p["openPrice"]["ask"]) / 2,
@@ -100,11 +109,10 @@ class CapitalConnector(BaseConnector):
         df.set_index("timestamp", inplace=True)
         return df
 
+    @_retry
     async def get_current_price(self, symbol: str) -> dict:
         url = f"{self.base_url}/api/v1/markets/{symbol}"
-        resp = requests.get(url, headers=self._headers())
-        resp.raise_for_status()
-        data = resp.json()
+        data = await asyncio.to_thread(self._get_json, url)
         snapshot = data.get("snapshot", {})
         return {
             "symbol": symbol,
@@ -122,7 +130,6 @@ class CapitalConnector(BaseConnector):
         order_type: str = "market",
         price: Optional[float] = None,
     ) -> dict:
-        url = f"{self.base_url}/api/v1/positions"
         direction = "BUY" if side.lower() == "buy" else "SELL"
         payload = {
             "epic": symbol,
@@ -133,9 +140,7 @@ class CapitalConnector(BaseConnector):
             payload["level"] = price
             payload["type"] = "LIMIT"
 
-        resp = requests.post(url, json=payload, headers=self._headers())
-        resp.raise_for_status()
-        data = resp.json()
+        data = await asyncio.to_thread(self._post_json, f"{self.base_url}/api/v1/positions", payload)
         return {
             "id": data.get("dealReference"),
             "symbol": symbol,
@@ -158,15 +163,12 @@ class CapitalConnector(BaseConnector):
                 return {"status": "no_position"}
 
         url = f"{self.base_url}/api/v1/positions/{position_id}"
-        resp = requests.delete(url, headers=self._headers())
-        resp.raise_for_status()
+        await asyncio.to_thread(self._delete, url)
         return {"status": "closed", "id": position_id}
 
+    @_retry
     async def get_open_positions(self) -> list[dict]:
-        url = f"{self.base_url}/api/v1/positions"
-        resp = requests.get(url, headers=self._headers())
-        resp.raise_for_status()
-        data = resp.json()
+        data = await asyncio.to_thread(self._get_json, f"{self.base_url}/api/v1/positions")
         positions = data.get("positions", [])
         return [
             {
@@ -180,11 +182,9 @@ class CapitalConnector(BaseConnector):
             for p in positions
         ]
 
+    @_retry
     async def get_balance(self) -> dict:
-        url = f"{self.base_url}/api/v1/accounts"
-        resp = requests.get(url, headers=self._headers())
-        resp.raise_for_status()
-        data = resp.json()
+        data = await asyncio.to_thread(self._get_json, f"{self.base_url}/api/v1/accounts")
         accounts = data.get("accounts", [])
         if accounts:
             acc = accounts[0]
@@ -195,3 +195,19 @@ class CapitalConnector(BaseConnector):
                 "currency": acc.get("currency", "USD"),
             }
         return {"total": 0, "free": 0, "used": 0, "currency": "USD"}
+
+    # --- blocking helpers, always called through asyncio.to_thread above ---
+
+    def _get_json(self, url: str, params: Optional[dict] = None) -> dict:
+        resp = requests.get(url, headers=self._headers(), params=params, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
+    def _post_json(self, url: str, payload: dict) -> dict:
+        resp = requests.post(url, json=payload, headers=self._headers(), timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
+    def _delete(self, url: str) -> None:
+        resp = requests.delete(url, headers=self._headers(), timeout=10)
+        resp.raise_for_status()
