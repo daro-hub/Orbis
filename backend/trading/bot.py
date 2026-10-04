@@ -43,10 +43,15 @@ class TradingBot:
         self._running = False
         self._last_signal: Optional[str] = None
         self.trade_log: list[dict] = []
+        # Symbols like "BTC/USDT" contain a "/" -- left unescaped, it was
+        # read as a path separator, so the log silently landed at
+        # results/bot_BTC/USDT_<strategy>.json (a stray "bot_BTC" directory)
+        # instead of a single flat file.
+        safe_symbol = symbol.replace("/", "-")
         self.log_file = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
             "results",
-            f"bot_{symbol}_{strategy.name.replace(' ', '_')}.json",
+            f"bot_{safe_symbol}_{strategy.name.replace(' ', '_')}.json",
         )
 
     async def start(self):

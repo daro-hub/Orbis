@@ -81,10 +81,11 @@ export default function BacktestPage() {
   return (
     <div>
       <nav className="nav">
-        <span className="nav-logo">Trading Platform</span>
+        <span className="nav-logo">Orbis</span>
         <Link href="/">Dashboard</Link>
         <Link href="/backtest" className="active">Backtest</Link>
         <Link href="/trade">Trade</Link>
+        <Link href="/bot">Bot</Link>
       </nav>
 
       <div className="container">

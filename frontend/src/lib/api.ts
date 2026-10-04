@@ -138,3 +138,46 @@ export async function fetchBalance() {
   const res = await fetch(`${API_BASE}/balance`);
   return res.json();
 }
+
+export interface Bot {
+  id: string;
+  symbol: string;
+  strategy: string;
+  params: Record<string, number>;
+  running: boolean;
+  trades: number;
+}
+
+export async function fetchBots(): Promise<Bot[]> {
+  const res = await fetch(`${API_BASE}/bot/list`);
+  const data = await res.json();
+  return data.bots;
+}
+
+export async function startBot(params: {
+  symbol: string;
+  strategy: string;
+  params: Record<string, number>;
+  timeframe: string;
+  check_interval: number;
+}) {
+  const res = await fetch(`${API_BASE}/bot/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to start bot");
+  }
+  return res.json();
+}
+
+export async function stopBot(botId: string) {
+  const res = await fetch(`${API_BASE}/bot/stop/${encodeURIComponent(botId)}`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to stop bot");
+  }
+  return res.json();
+}

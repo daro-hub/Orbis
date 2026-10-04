@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
             await close()
 
 
-app = FastAPI(title="Trading Platform API", lifespan=lifespan)
+app = FastAPI(title="Orbis API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -316,7 +316,7 @@ async def bot_start(req: BotStartRequest):
     return {"message": message}
 
 
-@app.post("/api/bot/stop/{bot_id}", dependencies=[Depends(require_api_key)])
+@app.post("/api/bot/stop/{bot_id:path}", dependencies=[Depends(require_api_key)])
 async def bot_stop(bot_id: str):
     return {"message": bot_module.stop_bot(bot_id)}
 

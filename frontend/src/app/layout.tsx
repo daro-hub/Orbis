@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Trading Platform",
-  description: "Automated Trading & Backtesting Platform",
+  title: "Orbis — Algorithmic Trading Platform",
+  description:
+    "Backtest and trade BTC, NASDAQ 100, and Gold with pluggable strategies, real risk management, and an automated bot.",
 };
 
 export default function RootLayout({

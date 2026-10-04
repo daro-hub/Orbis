@@ -54,10 +54,11 @@ export default function TradePage() {
   return (
     <div>
       <nav className="nav">
-        <span className="nav-logo">Trading Platform</span>
+        <span className="nav-logo">Orbis</span>
         <Link href="/">Dashboard</Link>
         <Link href="/backtest">Backtest</Link>
         <Link href="/trade" className="active">Trade</Link>
+        <Link href="/bot">Bot</Link>
       </nav>
 
       <div className="container">
